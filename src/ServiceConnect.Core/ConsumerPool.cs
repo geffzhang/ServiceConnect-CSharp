@@ -7,7 +7,7 @@ namespace ServiceConnect.Core
 {
     public class ConsumerPool : IConsumerPool
     {
-        private readonly List<IConsumer> _consumers = new List<IConsumer>(); 
+        private readonly List<IConsumer> _consumers = new List<IConsumer>();
 
         public void AddConsumer(string queueName, IList<string> messageTypes, ConsumerEventHandler eventHandler, IConfiguration config)
         {

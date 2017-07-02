@@ -60,7 +60,7 @@ namespace ServiceConnect.UnitTests
         public void StartConsumingShouldGetAllHandlerTypesFromContainer()
         {
             // Arrange
-            var bus = new Bus(_mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(_mockConfiguration.Object);
             _mockContainer.Setup(x => x.GetHandlerTypes()).Returns(new List<HandlerReference>());
 
             // Act
@@ -76,7 +76,7 @@ namespace ServiceConnect.UnitTests
         public void StartConsumingShouldConsumeAllMessageTypes()
         {
             // Arrange
-            var bus = new Bus(_mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(_mockConfiguration.Object);
             _mockConsumer.Setup(x => x.ConsumeMessageType(It.IsAny<string>()));
 
             var handlerReferences = new List<HandlerReference>
@@ -109,7 +109,7 @@ namespace ServiceConnect.UnitTests
         public void ConsumeMessageEventShouldProcessMessagesOnMessageHandler()
         {
             // Arrange
-            var bus = new Bus(_mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(_mockConfiguration.Object);
 
             var handlerReferences = new List<HandlerReference>
             {
@@ -160,7 +160,7 @@ namespace ServiceConnect.UnitTests
             var mockProcessManagerFinder = new Mock<IProcessManagerFinder>();
             _mockConfiguration.Setup(x => x.GetProcessManagerFinder()).Returns(mockProcessManagerFinder.Object);
 
-            var bus = new Bus(_mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(_mockConfiguration.Object);
 
             var handlerReferences = new List<HandlerReference>
             {
@@ -207,7 +207,11 @@ namespace ServiceConnect.UnitTests
         public void ConsumeMessageEventShouldProcessResponseMessage()
         {
             // Arrange
-            var bus = new Bus(_mockConfiguration.Object);
+            var mockProducer = new Mock<IProducer>();
+            var mockRequestConfiguration = new Mock<IRequestConfiguration>();
+            _mockConfiguration.Setup(x => x.GetProducer()).Returns(mockProducer.Object);
+
+            var bus = new ServiceConnect.Bus(_mockConfiguration.Object);
 
             var handlerReferences = new List<HandlerReference>
             {
@@ -236,8 +240,6 @@ namespace ServiceConnect.UnitTests
             _mockContainer.Setup(x => x.GetInstance<IProcessManagerProcessor>(It.IsAny<Dictionary<string, object>>())).Returns(mockProcessManagerProcessor.Object);
             mockProcessManagerProcessor.Setup(x => x.ProcessMessage<FakeMessage2>(It.IsAny<string>(), It.Is<IConsumeContext>(y => y.Headers == headers)));
 
-            var mockRequestConfiguration = new Mock<IRequestConfiguration>();
-            var mockProducer = new Mock<IProducer>();
 
             _mockConfiguration.Setup(x => x.GetRequestConfiguration(It.Is<Guid>(y => SetCorrelationId(y)))).Returns(mockRequestConfiguration.Object);
             var task = new Task(() => { });
@@ -252,7 +254,6 @@ namespace ServiceConnect.UnitTests
 
             mockProducer.Setup(x => x.Send(It.IsAny<Type>(), It.IsAny<byte[]>(), It.IsAny<Dictionary<string, string>>()));
 
-            _mockConfiguration.Setup(x => x.GetProducer()).Returns(mockProducer.Object);
 
             bus.SendRequest<FakeMessage1, FakeMessage2>(message, x => { }, null);
             bus.StartConsuming();
@@ -292,7 +293,7 @@ namespace ServiceConnect.UnitTests
             mockConfiguration.SetupGet(x => x.TransportSettings).Returns(new TransportSettings ());
 
             // Act
-            var bus = new Bus(mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(mockConfiguration.Object);
             bus.Publish(new FakeMessage1(Guid.NewGuid()), null);
 
             // Assert
@@ -326,6 +327,35 @@ namespace ServiceConnect.UnitTests
 
             // Assert
             mockProducer.Verify(x => x.Publish(typeof(FakeMessage1), It.IsAny<byte[]>(), null), Times.Once);
+        }
+
+        [Fact]
+        public void PublishWithRoutingKeyShouldPublishMessage()
+        {
+            // Arrange
+            var mockConfiguration = new Mock<IConfiguration>();
+            var mockProducer = new Mock<IProducer>();
+            var mockContainer = new Mock<IBusContainer>();
+            var mockProessManagerFinder = new Mock<IProcessManagerFinder>();
+
+            mockConfiguration.Setup(x => x.GetContainer()).Returns(mockContainer.Object);
+            mockConfiguration.Setup(x => x.GetProcessManagerFinder()).Returns(mockProessManagerFinder.Object);
+            mockConfiguration.Setup(x => x.GetProducer()).Returns(mockProducer.Object);
+            mockConfiguration.SetupGet(x => x.TransportSettings).Returns(new TransportSettings());
+
+            var message = new FakeMessage1(Guid.NewGuid())
+            {
+                Username = "JP"
+            };
+
+            mockProducer.Setup(x => x.Publish(typeof(FakeMessage1), It.IsAny<byte[]>(), null));
+
+            // Act
+            var bus = new ServiceConnect.Bus(mockConfiguration.Object);
+            bus.Publish(message, "routingkey1");
+
+            // Assert
+            mockProducer.Verify(x => x.Publish(typeof(FakeMessage1), It.IsAny<byte[]>(), It.Is<Dictionary<string, string>>(i => i.ContainsKey("RoutingKey"))), Times.Once);
         }
 
         [Fact]
@@ -493,7 +523,7 @@ namespace ServiceConnect.UnitTests
             mockProducer.Setup(x => x.Send(typeof(FakeMessage1), It.IsAny<byte[]>(), It.IsAny<Dictionary<string, string>>())).Callback(task.Start);
 
             // Act
-            var bus = new Bus(mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(mockConfiguration.Object);
             FakeMessage2 response = bus.SendRequest<FakeMessage1, FakeMessage2>(message, null, 1000);
 
             // Assert
@@ -535,7 +565,7 @@ namespace ServiceConnect.UnitTests
             });
 
             // Act
-            var bus = new Bus(mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(mockConfiguration.Object);
             FakeMessage2 response = bus.SendRequest<FakeMessage1, FakeMessage2>(message, null, 1000);
 
             // Assert
@@ -568,7 +598,7 @@ namespace ServiceConnect.UnitTests
             mockProducer.Setup(x => x.Send("test", typeof(FakeMessage1), It.IsAny<byte[]>(), It.IsAny<Dictionary<string, string>>())).Callback(task.Start);
 
             // Act
-            var bus = new Bus(mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(mockConfiguration.Object);
             FakeMessage2 response = bus.SendRequest<FakeMessage1, FakeMessage2>("test", message, null, 1000);
 
             // Assert
@@ -610,7 +640,7 @@ namespace ServiceConnect.UnitTests
             });
 
             // Act
-            var bus = new Bus(mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(mockConfiguration.Object);
             FakeMessage2 response = bus.SendRequest<FakeMessage1, FakeMessage2>("test", message, null, 1000);
 
             // Assert
@@ -643,7 +673,7 @@ namespace ServiceConnect.UnitTests
             mockProducer.Setup(x => x.Send(typeof(FakeMessage1), It.IsAny<byte[]>(), It.IsAny<Dictionary<string, string>>()));
 
             // Act
-            var bus = new Bus(mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(mockConfiguration.Object);
             bus.SendRequest<FakeMessage1, FakeMessage2>(message, x => { }, null);
 
             // Assert
@@ -678,7 +708,7 @@ namespace ServiceConnect.UnitTests
             mockProducer.Setup(x => x.Send(It.IsAny<Type>(), It.IsAny<byte[]>(), It.IsAny<Dictionary<string, string>>()));
 
             // Act
-            var bus = new Bus(mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(mockConfiguration.Object);
             bus.SendRequest(message, action, null);
 
             // Assert
@@ -710,7 +740,7 @@ namespace ServiceConnect.UnitTests
             mockProducer.Setup(x => x.Send("test", It.IsAny<Type>(), It.IsAny<byte[]>(), It.IsAny<Dictionary<string, string>>()));
 
             // Act
-            var bus = new Bus(mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(mockConfiguration.Object);
             bus.SendRequest<FakeMessage1, FakeMessage2>("test", message, x => { }, null);
 
             // Assert
@@ -745,7 +775,7 @@ namespace ServiceConnect.UnitTests
             mockProducer.Setup(x => x.Send(It.IsAny<Type>(), It.IsAny<byte[]>(), It.IsAny<Dictionary<string, string>>()));
 
             // Act
-            var bus = new Bus(mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(mockConfiguration.Object);
             bus.SendRequest("test", message, action, null);
 
             // Assert
@@ -793,7 +823,7 @@ namespace ServiceConnect.UnitTests
             mockProducer.Setup(x => x.Send(It.IsAny<Type>(), It.IsAny<byte[]>(), It.IsAny<Dictionary<string, string>>()));
 
             // Act
-            var bus = new Bus(mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(mockConfiguration.Object);
             bus.SendRequest(message, action, null);
 
             // Assert
@@ -828,7 +858,7 @@ namespace ServiceConnect.UnitTests
             mockProducer.Setup(x => x.Send("test2", It.IsAny<Type>(), It.IsAny<byte[]>(), It.IsAny<Dictionary<string, string>>()));
 
             // Act
-            var bus = new Bus(mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(mockConfiguration.Object);
             bus.SendRequest<FakeMessage1, FakeMessage2>(new List<string> { "test1", "test2" }, message, x => { });
 
             // Assert
@@ -877,7 +907,7 @@ namespace ServiceConnect.UnitTests
             });
 
             // Act
-            var bus = new Bus(mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(mockConfiguration.Object);
             IList<FakeMessage2> responses = bus.SendRequest<FakeMessage1, FakeMessage2>(new List<string>{ "test1", "test2" }, message, null, 1000);
 
             // Assert
@@ -911,7 +941,7 @@ namespace ServiceConnect.UnitTests
             mockProducer.Setup(x => x.Send("test2", It.IsAny<Type>(), It.IsAny<byte[]>(), It.IsAny<Dictionary<string, string>>())).Callback(task.Start);
 
             // Act
-            var bus = new Bus(mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(mockConfiguration.Object);
             var response = bus.SendRequest<FakeMessage1, FakeMessage2>(new List<string>
             {
                 "test1",
@@ -963,7 +993,7 @@ namespace ServiceConnect.UnitTests
             });
             
             // Act
-            var bus = new Bus(mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(mockConfiguration.Object);
             var responses = bus.PublishRequest<FakeMessage1, FakeMessage2>(message, 1, null, 1000);
             
             // Assert
@@ -980,7 +1010,7 @@ namespace ServiceConnect.UnitTests
             Action<Exception> action = exception => { actionCalled = true; };
             _mockConfiguration.Setup(x => x.ExceptionHandler).Returns(action);
 
-            var bus = new Bus(_mockConfiguration.Object);
+            var bus = new ServiceConnect.Bus(_mockConfiguration.Object);
 
             var handlerReferences = new List<HandlerReference>
             {

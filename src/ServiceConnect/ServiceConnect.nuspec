@@ -2,7 +2,7 @@
 <package>
   <metadata>
     <id>ServiceConnect</id>
-    <version>2.1.14-beta</version>
+    <version>4.0.2-pre</version>
     <title>ServiceConnect</title>
     <authors>Jakub Pachansky,Tim Watson</authors>
     <owners>Jakub Pachansky,Tim Watson</owners>
@@ -10,20 +10,38 @@
     <description>A simple, easy to use asynchronous messaging framework for .NET.</description>
     <language>en-GB</language>
     <projectUrl>https://github.com/R-Suite/ServiceConnect</projectUrl>
-    <copyright>Copyright 2015 ServiceConnect. All rights reserved</copyright>
-    <tags>MessageBus,R MessageBus,ServiceConnect,RabbitMQ MessageBus,RMessageBus,Messaging,Message,Bus,Service</tags>
+    <copyright>Copyright 2017 ServiceConnect. All rights reserved</copyright>
+    <tags>ServiceConnect,MessageBus,R MessageBus,RabbitMQ MessageBus,RMessageBus,Messaging,Message,Bus,Service</tags>
     <dependencies>
-      <dependency id="ServiceConnect.Client.RabbitMQ" version="2.1.8-beta" />
-      <dependency id="ServiceConnect.Interfaces" version="2.1.4-beta" />
-      <dependency id="Common.Logging" version="3.0.0" />
-      <dependency id="Newtonsoft.Json" version="6.0.1" />
+      <group targetFramework="net451">
+        <dependency id="Common.Logging" version="3.4.0-Beta2" />
+        <dependency id="Newtonsoft.Json" version="9.0.1" />
+        <dependency id="ServiceConnect.Interfaces" version="4.0.0-pre" />
+        <dependency id="ServiceConnect.Client.RabbitMQ" version="4.0.0-pre" />
+      </group>
+      <group targetFramework="netstandard1.6">
+        <dependency id="Common.Logging" version="3.4.0-Beta2" />
+        <dependency id="Newtonsoft.Json" version="9.0.1" />
+        <dependency id="ServiceConnect.Interfaces" version="4.0.0-pre" />
+        <dependency id="ServiceConnect.Client.RabbitMQ" version="4.0.0-pre" />
+        <dependency id="NETStandard.Library" version="1.6.0" />
+        <dependency id="Microsoft.Extensions.DependencyModel" version="1.1.0" />
+        <dependency id="System.Diagnostics.Process" version="4.3.0" />
+        <dependency id="System.Reflection.Extensions" version="4.3.0" />
+      </group>
     </dependencies>
   </metadata>
   <files>
-    <file src="bin\Release\ServiceConnect.dll" target="lib\net40\ServiceConnect.dll" />
-    <file src="bin\Release\ServiceConnect.Core.dll" target="lib\net40\ServiceConnect.Core.dll" />
-    <file src="bin\Release\ServiceConnect.Persistance.SqlServer.dll" target="lib\net40\ServiceConnect.Persistance.SqlServer.dll" />
-    <file src="bin\Release\ServiceConnect.Persistance.InMemory.dll" target="lib\net40\ServiceConnect.Persistance.InMemory.dll" />
-    <file src="bin\Release\ServiceConnect.Container.Default.dll" target="lib\net40\ServiceConnect.Container.Default.dll" />
+    <file src="bin\Release\net451\ServiceConnect.Container.Default.*" target="lib\net451" />
+    <file src="bin\Release\net451\ServiceConnect.Core.*" target="lib\net451" />
+    <file src="bin\Release\net451\ServiceConnect.*" target="lib\net451" />
+    <file src="bin\Release\net451\ServiceConnect.Persistance.InMemory.*" target="lib\net451" />
+    <file src="bin\Release\net451\ServiceConnect.Persistance.SqlServer.*" target="lib\net451" />
+    
+    <file src="bin\Release\netstandard1.6\ServiceConnect.Container.Default.*" target="lib\netstandard1.6" />
+    <file src="bin\Release\netstandard1.6\ServiceConnect.Core.*" target="lib\netstandard1.6" />
+    <file src="bin\Release\netstandard1.6\ServiceConnect.*" target="lib\netstandard1.6" />
+    <file src="bin\Release\netstandard1.6\ServiceConnect.Persistance.InMemory.*" target="lib\netstandard1.6" />
+    <file src="bin\Release\netstandard1.6\ServiceConnect.Persistance.SqlServer.*" target="lib\netstandard1.6" />
   </files>
 </package>

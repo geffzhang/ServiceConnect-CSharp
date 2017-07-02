@@ -37,20 +37,27 @@ namespace ServiceConnect.Container.Default
         /// <returns></returns>
         public IEnumerable<HandlerReference> GetHandlerTypes()
         {
-            IEnumerable<KeyValuePair<Type, ServiceDescriptor>> instances = _container.AllInstances.Where(
+            IEnumerable<KeyValuePair<ServiceDescriptor, Type>> instances = _container.AllInstances.Where(
                 i =>
-                    i.Key.Name == typeof (IMessageHandler<>).Name ||
-                    i.Key.Name == typeof (IStartProcessManager<>).Name ||
-                    i.Key.Name == typeof (Aggregator<>).Name);
+                    i.Value.Name == typeof (IMessageHandler<>).Name ||
+                    i.Value.Name == typeof(IStartProcessManager<>).Name ||
+                    i.Value.Name == typeof(Aggregator<>).Name);
 
+            var retval = new List<HandlerReference>();
+            foreach (var instance in instances)
+            {
+                IEnumerable<object> attrs = instance.Key.ServiceType.GetTypeInfo().GetCustomAttributes(false);
+                var routingKeys = attrs.OfType<RoutingKey>().Select(rk => rk.GetValue()).ToList();
 
-            return instances.Where(
-                instance => instance.Value.ServiceType != null && !string.IsNullOrEmpty(instance.Value.ServiceType.Name))
-                .Select(instance => new HandlerReference
+                retval.Add(new HandlerReference
                 {
-                    MessageType = instance.Key.GetGenericArguments()[0],
-                    HandlerType = instance.Value.ServiceType
+                    MessageType = instance.Value.GetGenericArguments()[0],
+                    HandlerType = instance.Key.ServiceType,
+                    RoutingKeys = routingKeys
                 });
+            }
+
+            return retval;
         }
 
         /// <summary>
@@ -60,13 +67,24 @@ namespace ServiceConnect.Container.Default
         /// <returns></returns>
         public IEnumerable<HandlerReference> GetHandlerTypes(Type messageHandler)
         {
-            var handlers = _container.AllInstances.Where(i => i.Key == messageHandler).Select(instance => new HandlerReference
-            {
-                MessageType = instance.Key.GetGenericArguments()[0],
-                HandlerType = instance.Value.ServiceType
-            });
+            IEnumerable<KeyValuePair<ServiceDescriptor, Type>> instances = _container.AllInstances.Where(i => i.Value == messageHandler);
 
-            return handlers;
+            var retval = new List<HandlerReference>();
+
+            foreach (var instance in instances)
+            {
+                IEnumerable<object> attrs = instance.Key.ServiceType.GetTypeInfo().GetCustomAttributes(false);
+                var routingKeys = attrs.OfType<RoutingKey>().Select(rk => rk.GetValue()).ToList();
+
+                retval.Add(new HandlerReference
+                {
+                    MessageType = instance.Value.GetGenericArguments()[0],
+                    HandlerType = instance.Key.ServiceType,
+                    RoutingKeys = routingKeys
+                });
+            }
+
+            return retval;
         }
 
         /// <summary>
@@ -105,6 +123,24 @@ namespace ServiceConnect.Container.Default
         /// </summary>
         public void ScanForHandlers()
         {
+#if NETSTANDARD1_6
+            var assemblies = Microsoft.Extensions.DependencyModel.DependencyContext.Default.RuntimeLibraries;
+            foreach (var assembly in assemblies)
+            {
+                try 
+                {          
+                    var asm = Assembly.Load(new AssemblyName(assembly.Name));
+                    var pluginTypes = asm != null ? asm.GetTypes().Where(IsHandler).ToList() : null;
+
+                    if (null != pluginTypes && pluginTypes.Count > 0)
+                    {
+                        _container.RegisterForAll(pluginTypes);
+                    }
+                }
+                catch (Exception)
+                { }
+            }
+#else
             foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
             {
                 var pluginTypes = asm != null ? asm.GetTypes().Where(IsHandler).ToList() : null;
@@ -114,6 +150,7 @@ namespace ServiceConnect.Container.Default
                     _container.RegisterForAll(pluginTypes);
                 }
             }
+#endif
         }
 
         /// <summary>
@@ -175,7 +212,7 @@ namespace ServiceConnect.Container.Default
             var isHandler = t.GetInterfaces().Any(i => i.Name == typeof(IMessageHandler<>).Name) ||
                             t.GetInterfaces().Any(i => i.Name == typeof(IStartProcessManager<>).Name) ||
                             t.GetInterfaces().Any(i => i.Name == typeof(IStreamHandler<>).Name) ||
-                            (t.BaseType != null && t.BaseType.Name == typeof(Aggregator<>).Name);
+                            (t.GetTypeInfo().BaseType != null && t.GetTypeInfo().BaseType.Name == typeof(Aggregator<>).Name);
 
             return isHandler;
         }

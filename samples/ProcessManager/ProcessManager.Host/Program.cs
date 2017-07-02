@@ -1,8 +1,7 @@
 ﻿using System;
-using System.Collections.Generic;
-using ProcessManager.Messages;
+using Ruffer.Reporting.SqlTransformation;
 using ServiceConnect;
-using ServiceConnect.Persistance.InMemory;
+using ServiceConnect.Persistance.MongoDb;
 
 namespace ProcessManager.Host
 {
@@ -13,7 +12,10 @@ namespace ProcessManager.Host
             Console.WriteLine("*********** ProcessManager.Host ***********");
             Bus.Initialize(config =>
             {
-                config.SetProcessManagerFinder<InMemoryProcessManagerFinder>();
+                config.SetThreads(1);
+                //config.SetProcessManagerFinder<MongoDbProcessManagerFinder>();
+                config.SetProcessManagerFinder<SingletonProcessManagerFinder>();
+                config.SetHost("localhost");
             });
 
             Console.ReadLine();

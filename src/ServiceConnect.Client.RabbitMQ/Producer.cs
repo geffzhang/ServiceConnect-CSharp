@@ -19,6 +19,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using Common.Logging;
+using Newtonsoft.Json;
 using ServiceConnect.Interfaces;
 using RabbitMQ.Client;
 
@@ -31,11 +32,12 @@ namespace ServiceConnect.Client.RabbitMQ
         private IModel _model;
         private IConnection _connection;
         private readonly Object _lock = new Object();
-        private static readonly ILog Logger = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
-        private readonly ConnectionFactory _connectionFactory;
+        private static readonly ILog Logger = LogManager.GetLogger(typeof(Producer));
+        private ConnectionFactory _connectionFactory;
         private readonly string[] _hosts;
         private int _activeHost;
         private readonly long _maxMessageSize;
+        private string[] _serverNames;
 
         public Producer(ITransportSettings transportSettings, IDictionary<string, IList<string>> queueMappings)
         {
@@ -45,6 +47,15 @@ namespace ServiceConnect.Client.RabbitMQ
             _hosts = transportSettings.Host.Split(',');
             _activeHost = 0;
 
+            Retry.Do(CreateConnection, ex =>
+            {
+                DisposeConnection();
+                SwitchHost();
+            }, new TimeSpan(0, 0, 0, 10));
+        }
+        
+        private void CreateConnection()
+        {
             _connectionFactory = new ConnectionFactory
             {
                 HostName = _hosts[_activeHost],
@@ -53,43 +64,39 @@ namespace ServiceConnect.Client.RabbitMQ
                 Port = AmqpTcpEndpoint.UseDefaultPort
             };
 
-            if (!string.IsNullOrEmpty(transportSettings.Username))
+            if (!string.IsNullOrEmpty(_transportSettings.Username))
             {
-                _connectionFactory.UserName = transportSettings.Username;
+                _connectionFactory.UserName = _transportSettings.Username;
             }
 
-            if (!string.IsNullOrEmpty(transportSettings.Password))
+            if (!string.IsNullOrEmpty(_transportSettings.Password))
             {
-                _connectionFactory.Password = transportSettings.Password;
+                _connectionFactory.Password = _transportSettings.Password;
             }
 
             if (_transportSettings.SslEnabled)
             {
+                _serverNames = _transportSettings.ServerName.Split(',');
+
                 _connectionFactory.Ssl = new SslOption
                 {
                     Enabled = true,
-                    AcceptablePolicyErrors = transportSettings.AcceptablePolicyErrors,
-                    ServerName = transportSettings.ServerName,
-                    CertPassphrase = transportSettings.CertPassphrase,
-                    CertPath = transportSettings.CertPath,
-                    Certs = transportSettings.Certs,
-                    Version = transportSettings.Version,
-                    CertificateSelectionCallback = transportSettings.CertificateSelectionCallback,
-                    CertificateValidationCallback = transportSettings.CertificateValidationCallback
+                    AcceptablePolicyErrors = _transportSettings.AcceptablePolicyErrors,
+                    ServerName = _serverNames[_activeHost],
+                    CertPassphrase = _transportSettings.CertPassphrase,
+                    CertPath = _transportSettings.CertPath,
+                    Certs = _transportSettings.Certs,
+                    CertificateSelectionCallback = _transportSettings.CertificateSelectionCallback,
+                    CertificateValidationCallback = _transportSettings.CertificateValidationCallback
                 };
                 _connectionFactory.Port = AmqpTcpEndpoint.DefaultAmqpSslPort;
             }
 
-            if (!string.IsNullOrEmpty(transportSettings.VirtualHost))
+            if (!string.IsNullOrEmpty(_transportSettings.VirtualHost))
             {
-                _connectionFactory.VirtualHost = transportSettings.VirtualHost;
+                _connectionFactory.VirtualHost = _transportSettings.VirtualHost;
             }
 
-            CreateConnection();
-        }
-
-        private void CreateConnection()
-        {
             _connection = _connectionFactory.CreateConnection();
             _model = _connection.CreateModel();
         }
@@ -117,29 +124,24 @@ namespace ServiceConnect.Client.RabbitMQ
                 basicProperties.MessageId = basicProperties.Headers["MessageId"].ToString(); // keep track of retries
 
                 basicProperties.SetPersistent(true);
-                var exchangeName = ConfigureExchange(type.FullName.Replace(".", string.Empty));
 
-                Retry.Do(() => _model.BasicPublish(exchangeName, _transportSettings.QueueName, basicProperties, envelope.Body),
-                    ex => RetryConnection(),
-                    new TimeSpan(0, 0, 0, 6), 10);
+                string exchName = type.FullName.Replace(".", string.Empty);
+                var exchangeName = ConfigureExchange(exchName, "fanout");
+
+                Retry.Do(() => _model.BasicPublish(exchangeName, "", basicProperties, envelope.Body),
+                ex =>
+                {
+                    Logger.Error("Error publishing message", ex);
+                    DisposeConnection();
+                    RetryConnection();
+                }, new TimeSpan(0, 0, 0, 6), 10);
             }
         }
 
         private void RetryConnection()
         {
             Logger.Debug("In Producer.RetryConnection()");
-
-            if (_hosts.Length > 1)
-            {
-                if (_activeHost < _hosts.Length - 1)
-                {
-                    _activeHost++;
-                }
-                else
-                {
-                    _activeHost = 0;
-                }
-            }
+            SwitchHost();
             CreateConnection();
         }
 
@@ -160,8 +162,12 @@ namespace ServiceConnect.Client.RabbitMQ
                     basicProperties.MessageId = basicProperties.Headers["MessageId"].ToString(); // keep track of retries
 
                     Retry.Do(() => _model.BasicPublish(string.Empty, endPoint, basicProperties, message),
-                             ex => RetryConnection(),
-                             new TimeSpan(0, 0, 0, 6), 10);
+                    ex =>
+                    {
+                        DisposeConnection();
+                        RetryConnection();
+                    },
+                    new TimeSpan(0, 0, 0, 6), 10);
                 }
             }
         }
@@ -179,8 +185,12 @@ namespace ServiceConnect.Client.RabbitMQ
                 basicProperties.MessageId = basicProperties.Headers["MessageId"].ToString(); // keep track of retries
 
                 Retry.Do(() => _model.BasicPublish(string.Empty, endPoint, basicProperties, message),
-                         ex => RetryConnection(),
-                         new TimeSpan(0, 0, 0, 6), 10);
+                ex =>
+                {
+                    DisposeConnection();
+                    RetryConnection();
+                },
+                new TimeSpan(0, 0, 0, 6), 10);
             }
         }
 
@@ -282,16 +292,20 @@ namespace ServiceConnect.Client.RabbitMQ
                 basicProperties.MessageId = basicProperties.Headers["MessageId"].ToString(); // keep track of retries
 
                 Retry.Do(() => _model.BasicPublish(string.Empty, endPoint, basicProperties, envelope.Body),
-                         ex => RetryConnection(),
-                         new TimeSpan(0, 0, 0, 6), 10);
+                ex =>
+                {
+                    DisposeConnection();
+                    RetryConnection();
+                },
+                new TimeSpan(0, 0, 0, 6), 10);
             }
         }
 
-        private string ConfigureExchange(string exchangeName)
+        private string ConfigureExchange(string exchangeName, string type)
         {
             try
             {
-                _model.ExchangeDeclare(exchangeName, "fanout", true, false, null);
+                _model.ExchangeDeclare(exchangeName, type, true, false, null);
             }
             catch (Exception ex)
             {
@@ -299,6 +313,56 @@ namespace ServiceConnect.Client.RabbitMQ
             }
 
             return exchangeName;
+        }
+
+        private void DisposeConnection()
+        {
+            try
+            {
+                lock (_connection)
+                {
+                    if (_connection != null && _connection.IsOpen)
+                    {
+                        _connection.Close();
+                        _connection.Dispose();
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Warn("Exception trying to close connection", e);
+            }
+
+            try
+            {
+                lock (_model)
+                {
+                    if (_model != null && _model.IsOpen)
+                    {
+                        _model.Close();
+                        _model.Dispose();
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Warn("Exception trying to close model", e);
+            }
+        }
+
+        private void SwitchHost()
+        {
+            if (_hosts.Length > 1)
+            {
+                if (_activeHost < _hosts.Length - 1)
+                {
+                    _activeHost++;
+                }
+                else
+                {
+                    _activeHost = 0;
+                }
+            }
         }
     }
 }

@@ -18,6 +18,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using Common.Logging;
 using Newtonsoft.Json;
 using ServiceConnect.Interfaces;
@@ -26,7 +27,7 @@ namespace ServiceConnect.Core
 {
     public class ProcessManagerProcessor : IProcessManagerProcessor
     {
-        private static readonly ILog Logger = LogManager.GetLogger(MethodBase.GetCurrentMethod().DeclaringType);
+        private static readonly ILog Logger = LogManager.GetLogger(typeof(ProcessManagerProcessor));
 
         private readonly IProcessManagerFinder _processManagerFinder;
         private readonly IBusContainer _container;
@@ -76,18 +77,18 @@ namespace ServiceConnect.Core
 
                     // Execute FindProcessManagerData - see if already exists
                     object persistanceData = processManagerInstance.HandlerType.GetMethod("FindProcessManagerData").Invoke(processManager, new[] { messageObject });
-                    
+
                     // Get Data Type
-                    Type dataType = processManagerInstance.HandlerType.BaseType.GetGenericArguments()[0];
+                    Type dataType = processManagerInstance.HandlerType.GetTypeInfo().BaseType.GetGenericArguments()[0];
 
                     bool processManagerAlreadyExists = true;
                     object data;
 
-                    // Process Mnager Data does not exist, create new instance 
+                    // Process Manager Data does not exist, create new instance 
                     if (null == persistanceData)
                     {
                         processManagerAlreadyExists = false;
-                        data = (IProcessManagerData) Activator.CreateInstance(dataType);
+                        data = (IProcessManagerData)Activator.CreateInstance(dataType);
                     }
                     else
                     {
@@ -137,7 +138,7 @@ namespace ServiceConnect.Core
 
             // This is used when processing Sent (rather than Published) messages
             // Get message BaseType and call ProcessMessage recursively to see if there are any handlers interested in the BaseType
-            Type newBaseType = msgType.BaseType;
+            Type newBaseType = msgType.GetTypeInfo().BaseType;
             if (newBaseType != null && newBaseType.Name != typeof(object).Name)
             {
                 MethodInfo startProcessManagers = GetType().GetMethod("StartProcessManagersBaseType", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -150,8 +151,8 @@ namespace ServiceConnect.Core
         private void LoadExistingProcessManagersBaseType<T, TB>(string message, IConsumeContext context) where T : Message where TB : Message
         {
             IEnumerable<HandlerReference> handlerReferences = _container.GetHandlerTypes(typeof(IMessageHandler<TB>))
-                                                                        .Where(h => h.HandlerType.BaseType != null &&
-                                                                                    h.HandlerType.BaseType.Name == typeof(ProcessManager<>).Name);
+                                                                        .Where(h => h.HandlerType.GetTypeInfo().BaseType != null &&
+                                                                                    h.HandlerType.GetTypeInfo().BaseType.Name == typeof(ProcessManager<>).Name);
 
             InitLoadExistingProcessManagerHandlers<T>(message, context, handlerReferences, typeof(TB));
         }
@@ -159,8 +160,8 @@ namespace ServiceConnect.Core
         private void LoadExistingProcessManagers<T>(string message, IConsumeContext context, Type baseType = null) where T : Message
         {
             IEnumerable<HandlerReference> handlerReferences = _container.GetHandlerTypes(typeof(IMessageHandler<T>))
-                                                                        .Where(h => h.HandlerType.BaseType != null &&
-                                                                                    h.HandlerType.BaseType.Name == typeof(ProcessManager<>).Name);
+                                                                        .Where(h => h.HandlerType.GetTypeInfo().BaseType != null &&
+                                                                                    h.HandlerType.GetTypeInfo().BaseType.Name == typeof(ProcessManager<>).Name);
 
             InitLoadExistingProcessManagerHandlers<T>(message, context, handlerReferences, baseType);
         }
@@ -186,7 +187,7 @@ namespace ServiceConnect.Core
                     object persistanceData = handlerReference.HandlerType.GetMethod("FindProcessManagerData").Invoke(processManager, new[] {messageObject});
 
                     // Get data type
-                    Type dataType = handlerReference.HandlerType.BaseType.GetGenericArguments()[0];
+                    Type dataType = handlerReference.HandlerType.GetTypeInfo().BaseType.GetGenericArguments()[0];
 
                     if (null == persistanceData)
                     {
@@ -242,7 +243,7 @@ namespace ServiceConnect.Core
 
             // This is used when processing Sent (rather than Published) messages
             // Get message BaseType and call ProcessMessage recursively to see if there are any handlers interested in the BaseType
-            Type newBaseType = msgType.BaseType;
+            Type newBaseType = msgType.GetTypeInfo().BaseType;
             if (newBaseType != null && newBaseType.Name != typeof (object).Name)
             {
                 MethodInfo loadExistingProcessManagers = GetType().GetMethod("LoadExistingProcessManagersBaseType", BindingFlags.NonPublic | BindingFlags.Instance);

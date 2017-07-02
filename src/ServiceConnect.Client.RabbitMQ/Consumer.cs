@@ -28,7 +28,7 @@ namespace ServiceConnect.Client.RabbitMQ
 {
     public class Consumer : IConsumer
     {
-        private static readonly ILog Logger = LogManager.GetLogger(System.Reflection.MethodBase.GetCurrentMethod().DeclaringType);
+        private static readonly ILog Logger = LogManager.GetLogger(typeof(Consumer));
         private readonly ITransportSettings _transportSettings;
         private IConnection _connection;
         private IModel _model;
@@ -52,6 +52,7 @@ namespace ServiceConnect.Client.RabbitMQ
         private readonly bool _durable;
         private readonly ushort _prefetchCount;
         private readonly bool _disablePrefetch;
+        private string[] _serverNames;
 
         public Consumer(ITransportSettings transportSettings)
         {
@@ -81,28 +82,43 @@ namespace ServiceConnect.Client.RabbitMQ
         /// <param name="args"></param>
         public void Event(object consumer, BasicDeliverEventArgs args)
         {
+            try
+            {
+                if (!args.BasicProperties.Headers.ContainsKey("TypeName") && !args.BasicProperties.Headers.ContainsKey("FullTypeName"))
+                {
+                    const string errMsg = "Error processing message, Message headers must contain type name.";
+                    Logger.Error(errMsg);
+                }
+
+                if (args.Redelivered)
+                {
+                    SetHeader(args.BasicProperties.Headers, "Redelivered", true);
+                }
+
+                ProcessMessage(args);
+            }
+            finally
+            {
+                _model.BasicAck(args.DeliveryTag, false);
+            }
+        }
+
+        private void ProcessMessage(BasicDeliverEventArgs args)
+        {
             ConsumeEventResult result;
             IDictionary<string, object> headers = args.BasicProperties.Headers;
 
             try
             {
-                SetHeader(args, "TimeReceived", DateTime.UtcNow.ToString("O"));
-                SetHeader(args, "DestinationMachine", Environment.MachineName);
-                SetHeader(args, "DestinationAddress", _transportSettings.QueueName);
-
-                if (!headers.ContainsKey("TypeName") || !headers.ContainsKey("FullTypeName"))
-                {
-                    const string errMsg = "Error processing message, Message headers must contain type name.";
-                    Logger.Error(errMsg);
-                    throw new Exception(errMsg);
-                }
+                SetHeader(args.BasicProperties.Headers, "TimeReceived", DateTime.UtcNow.ToString("O"));
+                SetHeader(args.BasicProperties.Headers, "DestinationMachine", Environment.MachineName);
+                SetHeader(args.BasicProperties.Headers, "DestinationAddress", _transportSettings.QueueName);
 
                 var typeName = Encoding.UTF8.GetString((byte[])(headers.ContainsKey("FullTypeName") ? headers["FullTypeName"] : headers["TypeName"]));
 
                 result = _consumerEventHandler(args.Body, typeName, headers);
-                _model.BasicAck(args.DeliveryTag, false);
 
-                SetHeader(args, "TimeProcessed", DateTime.UtcNow.ToString("O"));
+                SetHeader(args.BasicProperties.Headers, "TimeProcessed", DateTime.UtcNow.ToString("O"));
             }
             catch (Exception ex)
             {
@@ -125,7 +141,7 @@ namespace ServiceConnect.Client.RabbitMQ
                 if (retryCount < _maxRetries)
                 {
                     retryCount++;
-                    SetHeader(args, "RetryCount", retryCount);
+                    SetHeader(args.BasicProperties.Headers, "RetryCount", retryCount);
 
                     _model.BasicPublish(string.Empty, _retryQueueName, args.BasicProperties, args.Body);
                 }
@@ -143,7 +159,7 @@ namespace ServiceConnect.Client.RabbitMQ
                             Logger.Warn("Error serializing exception", ex);
                         }
 
-                        SetHeader(args, "Exception", JsonConvert.SerializeObject(new
+                        SetHeader(args.BasicProperties.Headers, "Exception", JsonConvert.SerializeObject(new
                         {
                             TimeStamp = DateTime.Now,
                             ExceptionType = result.Exception.GetType().FullName,
@@ -184,7 +200,12 @@ namespace ServiceConnect.Client.RabbitMQ
             if (autoDelete.HasValue)
                 _autoDelete = autoDelete.Value;
 
-            CreateConsumer();
+            Retry.Do(CreateConsumer, ex =>
+            {
+                Logger.Error(string.Format("Error creating consumer - queueName: {0}", queueName), ex);
+                DisposeConnection();
+                SwitchHost();
+            }, new TimeSpan(0, 0, 0, 10));
         }
 
         private void CreateConsumer()
@@ -197,7 +218,7 @@ namespace ServiceConnect.Client.RabbitMQ
                 Protocol = Protocols.DefaultProtocol,
                 Port = AmqpTcpEndpoint.UseDefaultPort
             };
-
+            
             if (_heartbeatEnabled)
             {
                 connectionFactory.RequestedHeartbeat = _heartbeatTime;
@@ -215,15 +236,16 @@ namespace ServiceConnect.Client.RabbitMQ
 
             if (_transportSettings.SslEnabled)
             {
+                _serverNames = _transportSettings.ServerName.Split(',');
+                
                 connectionFactory.Ssl = new SslOption
                 {
                     Enabled = true,
                     AcceptablePolicyErrors = _transportSettings.AcceptablePolicyErrors,
-                    ServerName = _transportSettings.ServerName,
+                    ServerName = _serverNames[_activeHost],
                     CertPassphrase = _transportSettings.CertPassphrase,
                     CertPath = _transportSettings.CertPath,
                     Certs = _transportSettings.Certs,
-                    Version = _transportSettings.Version,
                     CertificateSelectionCallback = _transportSettings.CertificateSelectionCallback,
                     CertificateValidationCallback = _transportSettings.CertificateValidationCallback
                 };
@@ -281,7 +303,7 @@ namespace ServiceConnect.Client.RabbitMQ
             consumer.Received += Event;
             if (_heartbeatEnabled)
             {
-                consumer.Shutdown += ConsumerShutdown;
+                _connection.ConnectionShutdown += ConnectionShutdown;
             }
             _model.BasicConsume(queueName, false, consumer);
 
@@ -290,7 +312,7 @@ namespace ServiceConnect.Client.RabbitMQ
 
         public void ConsumeMessageType(string messageTypeName)
         {
-            string exchange = ConfigureExchange(messageTypeName);
+            string exchange = ConfigureExchange(messageTypeName, "fanout");
 
             if (!string.IsNullOrEmpty(exchange))
             {
@@ -306,7 +328,7 @@ namespace ServiceConnect.Client.RabbitMQ
             }
         }
 
-        private void ConsumerShutdown(object sender, ShutdownEventArgs e)
+        private void ConnectionShutdown(object sender, ShutdownEventArgs e)
         {
             if (_connectionClosed)
             {
@@ -314,21 +336,15 @@ namespace ServiceConnect.Client.RabbitMQ
                 return;
             }
 
-            if (_hosts.Length > 1)
-            {
-                if (_activeHost < _hosts.Length - 1)
-                {
-                    _activeHost++;
-                }
-                else
-                {
-                    _activeHost = 0;
-                }
-            }
+            SwitchHost();
 
             Logger.Debug("Heartbeat missed reconnecting to queue");
 
-            Retry.Do(CreateConsumer, ex => Logger.Error("Error connecting to queue - {0}", ex), new TimeSpan(0, 0, 0, 10));
+            Retry.Do(CreateConsumer, ex =>
+            {
+                Logger.Error("Error connecting to queue}", ex);
+                DisposeConnection();
+            }, new TimeSpan(0, 0, 0, 10));
         }
 
         private string GetErrorMessage(Exception exception)
@@ -345,21 +361,21 @@ namespace ServiceConnect.Client.RabbitMQ
             return sbMessage.ToString();
         }
 
-        private static void SetHeader<T>(BasicDeliverEventArgs args, string key, T value)
+        private static void SetHeader<T>(IDictionary<string, object> headers, string key, T value)
         {
             if (Equals(value, default(T)))
             {
-                args.BasicProperties.Headers.Remove(key);
+                headers.Remove(key);
             }
             else
             {
-                args.BasicProperties.Headers[key] = value;
+                headers[key] = value;
             }
         }
 
         private string ConfigureQueue()
         {
-            Logger.Debug("Configuring queue");
+            Logger.DebugFormat("Configuring queue - {0}", _queueName);
 
             try
             {
@@ -379,7 +395,7 @@ namespace ServiceConnect.Client.RabbitMQ
             _retryQueueName = _queueName + ".Retries";
             string retryDeadLetterExchangeName = _queueName + ".Retries.DeadLetter";
 
-            Logger.Debug("Configuring retry exchange");
+            Logger.DebugFormat("Configuring retry exchange - {0}", retryDeadLetterExchangeName);
 
             try
             {
@@ -420,7 +436,7 @@ namespace ServiceConnect.Client.RabbitMQ
 
         private string ConfigureErrorQueue()
         {
-            Logger.Debug("Configuring error queue");
+            Logger.DebugFormat("Configuring error queue {0}", _transportSettings.ErrorQueueName);
 
             try
             {
@@ -435,7 +451,7 @@ namespace ServiceConnect.Client.RabbitMQ
 
         private string ConfigureAuditQueue()
         {
-            Logger.Debug("Configuring audit queue");
+            Logger.DebugFormat("Configuring audit queue - {0}", _transportSettings.AuditQueueName);
 
             try
             {
@@ -448,14 +464,14 @@ namespace ServiceConnect.Client.RabbitMQ
             return _transportSettings.AuditQueueName;
         }
 
-        private string ConfigureExchange(string exchangeName)
+        private string ConfigureExchange(string exchangeName, string type)
         {
-            Logger.Debug("Configuring exchange");
+            Logger.DebugFormat("Configuring exchange - {0}", exchangeName);
 
             try
             {
                 // Hard code auto delete and durable to sensible defaults so that producers and consumers dont try to declare exchanges with different settings.
-                _model.ExchangeDeclare(exchangeName, "fanout", true, false, null);
+                _model.ExchangeDeclare(exchangeName, type, true, false, null);
             }
             catch (Exception ex)
             {
@@ -467,7 +483,7 @@ namespace ServiceConnect.Client.RabbitMQ
 
         private string ConfigureErrorExchange()
         {
-            Logger.Debug("Configuring error exchange");
+            Logger.DebugFormat("Configuring error exchange - {0}", _transportSettings.ErrorQueueName);
 
             try
             {
@@ -483,7 +499,7 @@ namespace ServiceConnect.Client.RabbitMQ
 
         private string ConfigureAuditExchange()
         {
-            Logger.Debug("Configuring audit exchange");
+            Logger.DebugFormat("Configuring audit exchange - {0}", _transportSettings.AuditQueueName);
 
             try
             {
@@ -524,13 +540,61 @@ namespace ServiceConnect.Client.RabbitMQ
                 try
                 {
                     Logger.Debug("Disposing connection");
-                    _connection.Dispose();
+
+                    if (_connection.IsOpen)
+                    {
+                        _connection.Close();
+                    }
                 }
-                catch (System.IO.EndOfStreamException ex)
+                catch (Exception ex)
                 {
                     Logger.Warn("Error disposing connection", ex);
                 }
                 _connection = null;
+            }
+        }
+
+        private void DisposeConnection()
+        {
+            try
+            {
+                if (_connection != null && _connection.IsOpen)
+                {
+                    _connection.Close();
+                    _connection.Dispose();
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Warn("Exception trying to close connection", e);
+            }
+
+            try
+            {
+                if (_model != null && _model.IsOpen)
+                {
+                    _model.Close();
+                    _model.Dispose();
+                }
+            }
+            catch (Exception e)
+            {
+                Logger.Warn("Exception trying to close model", e);
+            }
+        }
+
+        private void SwitchHost()
+        {
+            if (_hosts.Length > 1)
+            {
+                if (_activeHost < _hosts.Length - 1)
+                {
+                    _activeHost++;
+                }
+                else
+                {
+                    _activeHost = 0;
+                }
             }
         }
     }

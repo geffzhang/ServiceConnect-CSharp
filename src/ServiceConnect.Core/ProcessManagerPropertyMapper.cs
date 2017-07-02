@@ -48,7 +48,8 @@ namespace ServiceConnect.Core
 
                 propertiesHierarchy.Add(mi.Name, pi.PropertyType);
 
-                if (mi.ReflectedType == typeof (TProcessManagerData))
+                //if (mi.ReflectedType == typeof(TProcessManagerData))
+                if (mi.DeclaringType == typeof(TProcessManagerData))
                 {
                     break;
                 }

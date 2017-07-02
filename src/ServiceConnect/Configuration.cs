@@ -41,7 +41,7 @@ namespace ServiceConnect
 
         #region Private Fields
 
-        private string _configurationPath;
+        //private string _configurationPath;
         private string _endPoint;
         private string _queueName;
         private string _errorQueueName;
@@ -49,6 +49,7 @@ namespace ServiceConnect
         private bool? _auditingEnabled;
         private Type _containerType = typeof(DefaultBusContainer);
         private IBusContainer _busContainer;
+        private IProcessManagerFinder _processManagerFinder;
 
         #endregion
 
@@ -75,6 +76,7 @@ namespace ServiceConnect
         public IList<Type> AfterConsumingFilters { get; set; }
         public IList<Type> OutgoingFilters { get; set; }
         public IConsumerPool ConsumerPool { get; set; }
+        public bool EnableProcessManagerTimeouts { get; set; }
 
         #endregion
 
@@ -92,7 +94,7 @@ namespace ServiceConnect
                 ClientSettings = new Dictionary<string, object>()
             };
 
-            _configurationPath = AppDomain.CurrentDomain.SetupInformation.ConfigurationFile;
+            //_configurationPath = AppDomain.CurrentDomain.SetupInformation.ConfigurationFile;
 
             SetTransportSettings();
             SetPersistanceSettings();
@@ -322,7 +324,12 @@ namespace ServiceConnect
         /// <returns></returns>
         public IProcessManagerFinder GetProcessManagerFinder()
         {
-            return (IProcessManagerFinder)Activator.CreateInstance(ProcessManagerFinder, PersistenceStoreConnectionString, PersistenceStoreDatabaseName);
+            if (null == _processManagerFinder)
+            {
+                _processManagerFinder = (IProcessManagerFinder)Activator.CreateInstance(ProcessManagerFinder, PersistenceStoreConnectionString, PersistenceStoreDatabaseName);
+            }
+
+            return _processManagerFinder;
         }
 
         public IAggregatorPersistor GetAggregatorPersistor()

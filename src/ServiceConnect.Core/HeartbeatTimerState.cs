@@ -20,7 +20,9 @@ namespace ServiceConnect.Core
 {
     public class HeartbeatTimerState
     {
+#if NET451
         public PerformanceCounter CpuCounter { get; set; }
         public PerformanceCounter RamCounter { get; set; }
+#endif
     }
 }

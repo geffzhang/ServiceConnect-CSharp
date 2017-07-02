@@ -15,6 +15,7 @@
 //Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 using ServiceConnect.Client.RabbitMQ;
+using ServiceConnect.Container.Default;
 using ServiceConnect.Interfaces;
 using ServiceConnect.Persistance.SqlServer;
 using Xunit;
@@ -23,22 +24,45 @@ namespace ServiceConnect.IntegrationTests.Bus
 {
     public class BusSetupTests
     {
+        public class TestHandler : IMessageHandler<Message>
+        {
+            public IConsumeContext Context { get; set; }
+            public void Execute(Message message)
+            {
+                throw new System.NotImplementedException();
+            }
+        }
+
         [Fact]
         public void ShouldSetupBusWithDefaultConfiguration()
+        {
+            // Arrange / Act
+            IBus bus = ServiceConnect.Bus.Initialize();
+
+            // Assert
+            Assert.Equal(typeof(Consumer), bus.Configuration.ConsumerType);
+            Assert.Equal(typeof(Producer), bus.Configuration.ProducerType);
+            Assert.Same(typeof(DefaultBusContainer), bus.Configuration.GetContainer().GetType());
+            Assert.Equal(typeof(SqlServerProcessManagerFinder), bus.Configuration.ProcessManagerFinder);
+
+            bus.StopConsuming();
+            bus.Dispose();
+        }
+
+        [Fact]
+        public void ShouldResolveHandlerFromDefaultContainer()
         {
             // Arrange
             IBus bus = ServiceConnect.Bus.Initialize();
 
-            // Act
-            IConfiguration configuration = bus.Configuration;
-            bus.Dispose();
+            // Act 
+            var result = bus.Configuration.GetContainer().GetInstance<IMessageHandler<Message>>();
 
             // Assert
-            Assert.Equal(typeof(Consumer), configuration.ConsumerType);
-            Assert.Equal(typeof(Producer), configuration.ProducerType);
-            //Assert.Equal(typeof(StructureMapContainer), configuration.ContainerType);
-            Assert.Equal(typeof(SqlServerProcessManagerFinder), configuration.ProcessManagerFinder);
-        }
+            Assert.NotNull(result);
 
+            bus.StopConsuming();
+            bus.Dispose();
+        }
     }
 }
