@@ -17,6 +17,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using ServiceConnect.Client.RabbitMQ;
 using ServiceConnect.Interfaces;
 using ServiceConnect.Persistance.SqlServer;
@@ -55,7 +56,7 @@ namespace ServiceConnect.UnitTests
             Assert.Null(configuration.TransportSettings.Username);
             Assert.Null(configuration.TransportSettings.Password);
             //Assert.Equal(System.Diagnostics.Process.GetCurrentProcess().ProcessName, configuration.TransportSettings.QueueName);
-            Assert.Equal("dotnet-test-xunit", configuration.TransportSettings.QueueName);
+            Assert.Equal(Assembly.GetEntryAssembly().GetName().Name, configuration.TransportSettings.QueueName);
             Assert.False(configuration.TransportSettings.AuditingEnabled);
             Assert.Equal("errors", configuration.TransportSettings.ErrorQueueName);
             Assert.Equal("audit", configuration.TransportSettings.AuditQueueName);
@@ -206,7 +207,7 @@ namespace ServiceConnect.UnitTests
                 throw new NotImplementedException();
             }
 
-            public IEnumerable<HandlerReference> GetHandlerTypes(Type messageHandler)
+            public IEnumerable<HandlerReference> GetHandlerTypes(params Type[] messageHandler)
             {
                 throw new NotImplementedException();
             }
@@ -258,35 +259,18 @@ namespace ServiceConnect.UnitTests
 
         public class FakeConsumer : IConsumer
         {
-            public FakeConsumer(ITransportSettings transportSettings)
+            public FakeConsumer()
             {}
-
-            public void StartConsuming(ConsumerEventHandler messageReceived, string routingKey, string queueName = null, bool? exclusive = null, bool? autoDelete = null)
-            {
-                throw new NotImplementedException();
-            }
-
-            public void StartConsuming(ConsumerEventHandler messageReceived, string queueName, bool? exclusive = null,
-                bool? autoDelete = null)
-            {
-            }
-
-            public void StopConsuming()
-            {
-                throw new NotImplementedException();
-            }
-
-            public void ConsumeMessageType(string messageTypeName)
-            {
-                throw new NotImplementedException();
-            }
 
             public void Dispose()
             {
                 throw new NotImplementedException();
             }
 
-            public string Type { get; private set; }
+            public void StartConsuming(string queueName, IList<string> messageTypes, ConsumerEventHandler eventHandler, IConfiguration config)
+            {
+                throw new NotImplementedException();
+            }
         }
     }
 }
